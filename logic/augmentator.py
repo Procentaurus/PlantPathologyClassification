@@ -14,14 +14,14 @@ class Augmentator:
 
     def augment_images(self):
         augmentations = {
-            # "crop": self._crop,
-            # "hflip": self._hflip,
-            # "vflip": self._vflip,
-            # "brightness_contrast": self._brightness_contrast,
-            # "shift_scale_rotate": self._shift_scale_rotate,
-            # "optical_distortion": self._optical_distortion,
-            # "grid_distortion": self._grid_distortion,
-            # "coarse_dropout": self._coarse_dropout,
+            "crop": self._crop,
+            "hflip": self._hflip,
+            "vflip": self._vflip,
+            "brightness_contrast": self._brightness_contrast,
+            "shift_scale_rotate": self._shift_scale_rotate,
+            "optical_distortion": self._optical_distortion,
+            "grid_distortion": self._grid_distortion,
+            "coarse_dropout": self._coarse_dropout,
             "gaussian_noise": self._gaussian_noise,
         }
 
