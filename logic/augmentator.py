@@ -2,6 +2,9 @@ import cv2
 import os
 import albumentations as A
 
+from .params import (IMG_HEIGHT,
+                     IMG_WIDTH)
+
 
 class Augmentator:
 
@@ -18,7 +21,6 @@ class Augmentator:
             "shift_scale_rotate": self._shift_scale_rotate,
             "optical_distortion": self._optical_distortion,
             "grid_distortion": self._grid_distortion,
-            "cutout": self._cutout,
             "coarse_dropout": self._coarse_dropout,
             "gaussian_noise": self._gaussian_noise,
         }
@@ -27,6 +29,18 @@ class Augmentator:
             image_path = os.path.join(self.dir_path, filename)
             name, ext = os.path.splitext(filename)
 
+            # =========================
+            # Save original image
+            # =========================
+            out_original_path = os.path.join(self.out_dir_path, filename)
+            if not os.path.exists(out_original_path):
+                img = cv2.imread(image_path)
+                cv2.imwrite(out_original_path, img)
+                print("Original saved:", filename)
+
+            # =========================
+            # Save augmented copies
+            # =========================
             for aug_name, aug_func in augmentations.items():
                 try:
                     augmented = aug_func(image_path)
@@ -34,6 +48,8 @@ class Augmentator:
                     out_name = f"{name}_{aug_name}{ext}"
                     out_path = os.path.join(self.out_dir_path, out_name)
                     cv2.imwrite(out_path, augmented_bgr)
+                    print("Image created:", out_name)
+
                 except Exception as e:
                     print(f"Skipping {filename} [{aug_name}]: {e}")
 
@@ -48,7 +64,11 @@ class Augmentator:
         aug = A.RandomCrop(height=image.shape[0] // 2,
                            width=image.shape[1] // 2,
                            p=1.0)
-        return aug(image=image)["image"]
+        cropped = aug(image=image)["image"]
+        resized = cv2.resize(cropped,
+                             (IMG_WIDTH, IMG_HEIGHT),
+                             interpolation=cv2.INTER_AREA)
+        return resized
 
     def _hflip(self, image_path):
         image = self._read_image(image_path)
@@ -63,8 +83,8 @@ class Augmentator:
     def _brightness_contrast(self, image_path):
         image = self._read_image(image_path)
         aug = A.RandomBrightnessContrast(
-            brightness_limit=0.2,
-            contrast_limit=0.2,
+            brightness_limit=0.5,
+            contrast_limit=0.5,
             p=1.0
         )
         return aug(image=image)["image"]
@@ -72,9 +92,9 @@ class Augmentator:
     def _shift_scale_rotate(self, image_path):
         image = self._read_image(image_path)
         aug = A.ShiftScaleRotate(
-            shift_limit=0.05,
+            shift_limit=0.08,
             scale_limit=0.1,
-            rotate_limit=15,
+            rotate_limit=30,
             border_mode=cv2.BORDER_REFLECT_101,
             p=1.0
         )
@@ -83,8 +103,8 @@ class Augmentator:
     def _optical_distortion(self, image_path):
         image = self._read_image(image_path)
         aug = A.OpticalDistortion(
-            distort_limit=0.05,
-            shift_limit=0.05,
+            distort_limit=0.1,
+            shift_limit=0.1,
             p=1.0
         )
         return aug(image=image)["image"]
@@ -92,19 +112,8 @@ class Augmentator:
     def _grid_distortion(self, image_path):
         image = self._read_image(image_path)
         aug = A.GridDistortion(
-            num_steps=5,
-            distort_limit=0.03,
-            p=1.0
-        )
-        return aug(image=image)["image"]
-
-    def _cutout(self, image_path):
-        image = self._read_image(image_path)
-        aug = A.Cutout(
-            num_holes=1,
-            max_h_size=64,
-            max_w_size=64,
-            fill_value=0,
+            num_steps=7,
+            distort_limit=(-0.08, 0.08),
             p=1.0
         )
         return aug(image=image)["image"]
@@ -112,7 +121,7 @@ class Augmentator:
     def _coarse_dropout(self, image_path):
         image = self._read_image(image_path)
         aug = A.CoarseDropout(
-            max_holes=4,
+            num_holes_range=(4, 5),
             max_height=64,
             max_width=64,
             fill_value=0,
@@ -121,22 +130,15 @@ class Augmentator:
         return aug(image=image)["image"]
 
     def _gaussian_noise(self, image_path):
-        """
-        Apply light Gaussian noise to simulate sensor noise.
-        Safe for leaf disease detection.
-        """
         image = self._read_image(image_path)
-
         aug = A.GaussNoise(
-            var_limit=(5.0, 20.0),
-            mean=0,
+            std_range=(0.08, 0.09),
             p=1.0
         )
-
         return aug(image=image)["image"]
 
 
 if __name__ == "__main__":
-    augmentator = Augmentator("data/resized_train_images",
-                              "data/aug_train_images")
+    augmentator = Augmentator(in_dir_path="data/test",
+                              out_dir_path="data/test_out")
     augmentator.augment_images()

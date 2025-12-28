@@ -1,6 +1,9 @@
 import os
 import cv2
 
+from .params import (IMG_HEIGHT,
+                     IMG_WIDTH)
+
 
 class Resizer:
 
@@ -32,12 +35,12 @@ class Resizer:
 if __name__ == "__main__":
     train_resizer = Resizer("data/orig_train_images",
                             "data/resized_train_images",
-                            width=256,
-                            height=256)
+                            width=IMG_WIDTH,
+                            height=IMG_HEIGHT)
     train_resizer.resize_images()
 
     test_resizer = Resizer("data/orig_test_images",
                            "data/resized_test_images",
-                           width=256,
-                           height=256)
+                           width=IMG_WIDTH,
+                           height=IMG_HEIGHT)
     test_resizer.resize_images()
