@@ -6,8 +6,10 @@ from sklearn.model_selection import KFold
 from torchvision import transforms
 from PIL import Image
 import pandas as pd
-from timm import create_model  # EfficientNetV2
 import numpy as np
+from timm import create_model  # EfficientNetV2
+
+from .evaluation import evaluate
 
 
 CLASSES = [
@@ -27,13 +29,13 @@ class LeafDataset(Dataset):
         # All augmented + original images
         self.images = [
             f for f in os.listdir(aug_images_dir)
-            if f.lower().endswith(('.jpg', '.jpeg', '.png'))
+            if f.lower().endswith(('.jpg'))
         ]
 
         # Map: original_image.jpg -> label_string
-        self.label_map = dict(
-            zip(csv_df['image'], csv_df['labels'])
-        )
+        self.label_map = {
+            row['image']: row['labels'] for _, row in csv_df.iterrows()
+        }
 
         self.transform = transforms.Compose([
             transforms.ToTensor(),
@@ -83,8 +85,8 @@ if __name__ == "__main__":
     # 5-Fold Training
     # ===========================
     kf = KFold(n_splits=5, shuffle=True, random_state=42)
-    epochs = 20
-    batch_size = 8
+    epochs = 12
+    batch_size = 16
     warmup_epochs = 2
 
     fold = 0
@@ -106,17 +108,25 @@ if __name__ == "__main__":
 
         criterion = nn.BCEWithLogitsLoss()
         optimizer = torch.optim.AdamW(model.parameters(),
-                                      lr=1e-4,
-                                      weight_decay=1e-2)
+                                      lr=5e-5,
+                                      weight_decay=2e-2)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,
                                                                T_max=epochs)
-
+        history = {
+            "train_loss": [],
+            "val_loss": [],
+            "micro_f1": [],
+            "macro_f1": []
+        }
+        best_val_loss = float('inf')
+        patience = 3
+        wait = 0
         for epoch in range(epochs):
             # Warmup
             if epoch < warmup_epochs:
                 lr_scale = 0.1 + 0.9 * (epoch / warmup_epochs)
                 for pg in optimizer.param_groups:
-                    pg['lr'] = 1e-4 * lr_scale
+                    pg['lr'] = 5e-5 * lr_scale
 
             # Training
             model.train()
@@ -129,8 +139,48 @@ if __name__ == "__main__":
                 loss.backward()
                 optimizer.step()
                 running_loss += loss.item() * images.size(0)
-            print(f"Fold {fold}, Epoch {epoch+1}, Loss: {running_loss/len(train_loader.dataset):.4f}")
+
+            train_loss = running_loss / len(train_loader.dataset)
+
+            # ---- Validation ----
+            val_loss, micro_f1, macro_f1 = evaluate(
+                model, val_loader, criterion, device
+            )
+
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                wait = 0
+                torch.save(model.state_dict(), f"best_fold_{fold}.pth")  # save best
+            else:
+                wait += 1
+                if wait >= patience:
+                    print(f"Early stopping at epoch {epoch+1}")
+                    break
+
             scheduler.step()
 
+            # ---- Store ----
+            history["train_loss"].append(train_loss)
+            history["val_loss"].append(val_loss)
+            history["micro_f1"].append(micro_f1)
+            history["macro_f1"].append(macro_f1)
+
+            print(
+                f"Fold {fold} | Epoch {epoch+1:02d} | "
+                f"Train Loss: {train_loss:.4f} | "
+                f"Val Loss: {val_loss:.4f} | "
+                f"Micro F1: {micro_f1:.4f} | "
+                f"Macro F1: {macro_f1:.4f}"
+            )
+
         # Save fold
-        torch.save(model.state_dict(), f"efficientnetv2_fold{fold}.pth")
+        torch.save(model.state_dict(), f"efficientnetv2_fold_{fold}.pth")
+
+        best_epoch = int(np.argmax(history["micro_f1"]))
+
+        print("\nBest epoch summary:")
+        print(f"Epoch: {best_epoch + 1}")
+        print(f"Train Loss: {history['train_loss'][best_epoch]:.4f}")
+        print(f"Val Loss: {history['val_loss'][best_epoch]:.4f}")
+        print(f"Micro F1: {history['micro_f1'][best_epoch]:.4f}")
+        print(f"Macro F1: {history['macro_f1'][best_epoch]:.4f}")
