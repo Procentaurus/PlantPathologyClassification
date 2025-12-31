@@ -10,6 +10,11 @@ import numpy as np
 from timm import create_model  # EfficientNetV2
 
 from .evaluation import evaluate
+from params import (EPOCHS,
+                    BATCH_SIZE,
+                    PATIENCE_EPOCHS,
+                    WARMUP_EPOCHS,
+                    LEARNING_RATE)
 
 
 CLASSES = [
@@ -85,9 +90,6 @@ if __name__ == "__main__":
     # 5-Fold Training
     # ===========================
     kf = KFold(n_splits=5, shuffle=True, random_state=42)
-    epochs = 12
-    batch_size = 16
-    warmup_epochs = 2
 
     fold = 0
     for train_idx, val_idx in kf.split(labels):
@@ -97,8 +99,8 @@ if __name__ == "__main__":
         train_dataset = Subset(LeafDataset(labels, aug_images_dir=aug_images_dir), train_idx)
         val_dataset = Subset(LeafDataset(labels, aug_images_dir=aug_images_dir), val_idx)
 
-        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-        val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+        train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
+        val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False)
 
         # ===========================
         # Model
@@ -111,7 +113,7 @@ if __name__ == "__main__":
                                       lr=5e-5,
                                       weight_decay=2e-2)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,
-                                                               T_max=epochs)
+                                                               T_max=EPOCHS)
         history = {
             "train_loss": [],
             "val_loss": [],
@@ -119,14 +121,14 @@ if __name__ == "__main__":
             "macro_f1": []
         }
         best_val_loss = float('inf')
-        patience = 3
+        patience = PATIENCE_EPOCHS
         wait = 0
-        for epoch in range(epochs):
+        for epoch in range(EPOCHS):
             # Warmup
-            if epoch < warmup_epochs:
-                lr_scale = 0.1 + 0.9 * (epoch / warmup_epochs)
+            if epoch < WARMUP_EPOCHS:
+                lr_scale = 0.1 + 0.9 * (epoch / WARMUP_EPOCHS)
                 for pg in optimizer.param_groups:
-                    pg['lr'] = 5e-5 * lr_scale
+                    pg['lr'] = LEARNING_RATE * lr_scale
 
             # Training
             model.train()
