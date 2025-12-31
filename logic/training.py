@@ -1,20 +1,24 @@
 import os
 import torch
 import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader, Subset
+import pandas as pd
+import numpy as np
+
 from sklearn.model_selection import KFold
 from torchvision import transforms
 from PIL import Image
-import pandas as pd
-import numpy as np
-from timm import create_model  # EfficientNetV2
+from timm import create_model
+from torch.utils.data import (Dataset,
+                              DataLoader,
+                              Subset)
 
 from .evaluation import evaluate
-from params import (EPOCHS,
-                    BATCH_SIZE,
-                    PATIENCE_EPOCHS,
-                    WARMUP_EPOCHS,
-                    LEARNING_RATE)
+from .params import (EPOCHS,
+                     BATCH_SIZE,
+                     PATIENCE_EPOCHS,
+                     WARMUP_EPOCHS,
+                     LEARNING_RATE,
+                     WEIGHT_DECAY)
 
 
 CLASSES = [
@@ -110,8 +114,8 @@ if __name__ == "__main__":
 
         criterion = nn.BCEWithLogitsLoss()
         optimizer = torch.optim.AdamW(model.parameters(),
-                                      lr=5e-5,
-                                      weight_decay=2e-2)
+                                      lr=LEARNING_RATE,
+                                      weight_decay=WEIGHT_DECAY)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,
                                                                T_max=EPOCHS)
         history = {
