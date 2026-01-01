@@ -8,18 +8,13 @@ from sklearn.model_selection import KFold
 from torchvision import transforms
 from PIL import Image
 from timm import create_model
-from torch.utils.data import (Dataset,
-                              DataLoader,
-                              Subset)
+from torch.utils.data import Dataset, DataLoader, Subset
 
 from .evaluation import evaluate
-from .params import (EPOCHS,
-                     BATCH_SIZE,
-                     PATIENCE_EPOCHS,
-                     WARMUP_EPOCHS,
-                     LEARNING_RATE,
-                     WEIGHT_DECAY)
-
+from .params import (
+    EPOCHS, BATCH_SIZE, PATIENCE_EPOCHS,
+    WARMUP_EPOCHS, LEARNING_RATE, WEIGHT_DECAY
+)
 
 CLASSES = [
     'healthy',
@@ -30,22 +25,18 @@ CLASSES = [
     'complex'
 ]
 
+# ===========================
+# Dataset (SAFE FOR K-FOLD)
+# ===========================
 class LeafDataset(Dataset):
-
     def __init__(self, csv_df, aug_images_dir):
         self.img_dir = aug_images_dir
 
-        # All augmented + original images
-        self.images = [
-            f for f in os.listdir(aug_images_dir)
-            if f.lower().endswith(('.jpg'))
-        ]
+        # originals only (KFold-safe)
+        self.original_images = csv_df["image"].tolist()
 
-        # Map: original_image.jpg -> label_string
-        self.label_map = {
-            row['image']: row['labels'] for _, row in csv_df.iterrows()
-        }
-
+        self.all_images = os.listdir(aug_images_dir)
+        self.label_map = dict(zip(csv_df["image"], csv_df["labels"]))
         self.transform = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize(
@@ -55,138 +46,112 @@ class LeafDataset(Dataset):
         ])
 
     def __len__(self):
-        return len(self.images)
+        return len(self.original_images)
 
     def encode_labels(self, label_str):
-        label_vec = torch.zeros(len(CLASSES), dtype=torch.float32)
+        vec = torch.zeros(len(CLASSES))
         for lbl in label_str.split():
-            if lbl in CLASSES:
-                label_vec[CLASSES.index(lbl)] = 1.0
-        return label_vec
-
-    def _get_original_name(self, filename):
-        """
-        800113bb65efe69e_crop.jpg -> 800113bb65efe69e.jpg
-        """
-        base, ext = os.path.splitext(filename)
-        original = base.split('_')[0] + ext
-        return original
+            vec[CLASSES.index(lbl)] = 1.0
+        return vec
 
     def __getitem__(self, idx):
-        fname = self.images[idx]
-        img_path = os.path.join(self.img_dir, fname)
+        orig = self.original_images[idx]
+        stem = os.path.splitext(orig)[0]
 
-        image = Image.open(img_path).convert('RGB')
-        image = self.transform(image)
+        # randomly pick ONE augmented version
+        candidates = [f for f in self.all_images if f.startswith(stem)]
+        fname = np.random.choice(candidates)
 
-        original_name = self._get_original_name(fname)
-        label_str = self.label_map[original_name]
-        labels = self.encode_labels(label_str)
-        return image, labels
+        img = Image.open(os.path.join(self.img_dir, fname)).convert("RGB")
+        img = self.transform(img)
+
+        labels = self.encode_labels(self.label_map[orig])
+        return img, labels
 
 
 if __name__ == "__main__":
-    labels = pd.read_csv("data/train.csv")
+    csv_labels = pd.read_csv("data/train.csv")
     aug_images_dir = "data/aug_train_images/"
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # ===========================
-    # 5-Fold Training
-    # ===========================
     kf = KFold(n_splits=5, shuffle=True, random_state=42)
 
-    fold = 0
-    for train_idx, val_idx in kf.split(labels):
-        fold += 1
-        print(f"Training fold {fold}...")
+    for fold, (train_idx, val_idx) in enumerate(kf.split(csv_labels), 1):
+        print(f"\nTraining fold {fold}...")
 
-        train_dataset = Subset(LeafDataset(labels, aug_images_dir=aug_images_dir), train_idx)
-        val_dataset = Subset(LeafDataset(labels, aug_images_dir=aug_images_dir), val_idx)
+        base_dataset = LeafDataset(csv_labels, aug_images_dir)
 
-        train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
-        val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False)
+        train_dataset = Subset(base_dataset, train_idx)
+        val_dataset = Subset(base_dataset, val_idx)
 
-        # ===========================
-        # Model
-        # ===========================
-        model = create_model('efficientnetv2_rw_s', pretrained=True, num_classes=6)
-        model = model.to(device)
+        train_loader = DataLoader(
+            train_dataset, batch_size=BATCH_SIZE,
+            shuffle=True, num_workers=4, pin_memory=True
+        )
+        val_loader = DataLoader(
+            val_dataset, batch_size=BATCH_SIZE,
+            shuffle=False, num_workers=4, pin_memory=True
+        )
+
+        model = create_model(
+            "efficientnetv2_rw_s",
+            pretrained=True,
+            num_classes=len(CLASSES)
+        ).to(device)
 
         criterion = nn.BCEWithLogitsLoss()
-        optimizer = torch.optim.AdamW(model.parameters(),
-                                      lr=LEARNING_RATE,
-                                      weight_decay=WEIGHT_DECAY)
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,
-                                                               T_max=EPOCHS)
-        history = {
-            "train_loss": [],
-            "val_loss": [],
-            "micro_f1": [],
-            "macro_f1": []
-        }
-        best_val_loss = float('inf')
-        patience = PATIENCE_EPOCHS
+        optimizer = torch.optim.AdamW(
+            model.parameters(),
+            lr=LEARNING_RATE,
+            weight_decay=WEIGHT_DECAY
+        )
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=EPOCHS
+        )
+
+        best_val = float("inf")
         wait = 0
         for epoch in range(EPOCHS):
-            # Warmup
             if epoch < WARMUP_EPOCHS:
-                lr_scale = 0.1 + 0.9 * (epoch / WARMUP_EPOCHS)
+                scale = 0.1 + 0.9 * (epoch / WARMUP_EPOCHS)
                 for pg in optimizer.param_groups:
-                    pg['lr'] = LEARNING_RATE * lr_scale
+                    pg["lr"] = LEARNING_RATE * scale
 
-            # Training
             model.train()
-            running_loss = 0.0
-            for images, labels in train_loader:
-                images, labels = images.to(device), labels.to(device)
+            train_loss = 0.0
+            for imgs, lbls in train_loader:
+                imgs, lbls = imgs.to(device), lbls.to(device)
                 optimizer.zero_grad()
-                outputs = model(images)
-                loss = criterion(outputs, labels)
+                loss = criterion(model(imgs), lbls)
                 loss.backward()
                 optimizer.step()
-                running_loss += loss.item() * images.size(0)
+                train_loss += loss.item() * imgs.size(0)
 
-            train_loss = running_loss / len(train_loader.dataset)
+            train_loss /= len(train_loader.dataset)
 
-            # ---- Validation ----
             val_loss, micro_f1, macro_f1 = evaluate(
                 model, val_loader, criterion, device
             )
 
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
+            print(
+                f"Fold {fold} | Epoch {epoch+1:02d} | "
+                f"Train {train_loss:.4f} | "
+                f"Val {val_loss:.4f} | "
+                f"Micro {micro_f1:.4f} | " # global F1
+                f"Macro {macro_f1:.4f}"    # avg F1 from all classes
+            )
+
+            if val_loss < best_val:
+                best_val = val_loss
                 wait = 0
-                torch.save(model.state_dict(), f"best_fold_{fold}.pth")  # save best
+                torch.save(model.state_dict(), f"best_fold_{fold}.pth")
             else:
                 wait += 1
-                if wait >= patience:
-                    print(f"Early stopping at epoch {epoch+1}")
+                if wait >= PATIENCE_EPOCHS:
+                    print("Early stopping")
                     break
 
             scheduler.step()
 
-            # ---- Store ----
-            history["train_loss"].append(train_loss)
-            history["val_loss"].append(val_loss)
-            history["micro_f1"].append(micro_f1)
-            history["macro_f1"].append(macro_f1)
-
-            print(
-                f"Fold {fold} | Epoch {epoch+1:02d} | "
-                f"Train Loss: {train_loss:.4f} | "
-                f"Val Loss: {val_loss:.4f} | "
-                f"Micro F1: {micro_f1:.4f} | "
-                f"Macro F1: {macro_f1:.4f}"
-            )
-
-        # Save fold
-        torch.save(model.state_dict(), f"efficientnetv2_fold_{fold}.pth")
-
-        best_epoch = int(np.argmax(history["micro_f1"]))
-
-        print("\nBest epoch summary:")
-        print(f"Epoch: {best_epoch + 1}")
-        print(f"Train Loss: {history['train_loss'][best_epoch]:.4f}")
-        print(f"Val Loss: {history['val_loss'][best_epoch]:.4f}")
-        print(f"Micro F1: {history['micro_f1'][best_epoch]:.4f}")
-        print(f"Macro F1: {history['macro_f1'][best_epoch]:.4f}")
+        del model, optimizer, scheduler
+        torch.cuda.empty_cache()
