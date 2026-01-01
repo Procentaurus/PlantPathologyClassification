@@ -7,3 +7,14 @@ PATIENCE_EPOCHS = 3
 WARMUP_EPOCHS = 2
 AUGMENTED_COPIES = 5
 WEIGHT_DECAY = 2e-2
+
+CLASSES = [
+    'healthy',
+    'scab',
+    'frog_eye_leaf_spot',
+    'rust',
+    'powdery_mildew',
+    'complex'
+]
+
+THRESHOLD = 0.35
