@@ -12,18 +12,15 @@ from torch.utils.data import Dataset, DataLoader, Subset
 
 from .evaluation import evaluate
 from .params import (
-    EPOCHS, BATCH_SIZE, PATIENCE_EPOCHS,
-    WARMUP_EPOCHS, LEARNING_RATE, WEIGHT_DECAY
+    EPOCHS,
+    BATCH_SIZE,
+    PATIENCE_EPOCHS,
+    WARMUP_EPOCHS,
+    LEARNING_RATE,
+    WEIGHT_DECAY,
+    CLASSES
 )
 
-CLASSES = [
-    'healthy',
-    'scab',
-    'frog_eye_leaf_spot',
-    'rust',
-    'powdery_mildew',
-    'complex'
-]
 
 # ===========================
 # Dataset (SAFE FOR K-FOLD)
