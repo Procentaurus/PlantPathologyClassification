@@ -18,7 +18,9 @@ from .params import (
     WARMUP_EPOCHS,
     LEARNING_RATE,
     WEIGHT_DECAY,
-    CLASSES
+    CLASSES,
+    STD_VECTOR,
+    MEAN_VECTOR
 )
 
 
@@ -36,10 +38,7 @@ class LeafDataset(Dataset):
         self.label_map = dict(zip(csv_df["image"], csv_df["labels"]))
         self.transform = transforms.Compose([
             transforms.ToTensor(),
-            transforms.Normalize(
-                mean=[0.485, 0.456, 0.406],
-                std=[0.229, 0.224, 0.225]
-            )
+            transforms.Normalize(mean=MEAN_VECTOR, std=STD_VECTOR),
         ])
 
     def __len__(self):
