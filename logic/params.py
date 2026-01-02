@@ -17,4 +17,6 @@ CLASSES = [
     'complex'
 ]
 
-THRESHOLD = 0.35
+THRESHOLD = 0.3
+MEAN_VECTOR = [0.485, 0.456, 0.406]
+STD_VECTOR = [0.229, 0.224, 0.225]
